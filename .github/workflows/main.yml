@@ -1,0 +1,58 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 2. 配置 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 3. 配置 Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.2.1'
+
+      - name: 4. 下载 sherpa-onnx Android AAR 依赖
+        run: |
+          mkdir -p OfflineCopyExtractor-v2/app/libs
+          AAR_URL=$(curl -s https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/latest | grep -o 'https://[^"]*sherpa-onnx-[^"]*\.aar' | head -n 1)
+          if [ -z "$AAR_URL" ]; then
+            AAR_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.10.30/sherpa-onnx-1.10.30.aar"
+          fi
+          echo "Downloading AAR from: $AAR_URL"
+          curl -L -o OfflineCopyExtractor-v2/app/libs/sherpa-onnx.aar "$AAR_URL"
+
+      - name: 5. 下载并精简 SenseVoice 离线语音模型
+        run: |
+          mkdir -p OfflineCopyExtractor-v2/app/src/main/assets/sensevoice
+          curl -L -o sensevoice.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
+          tar -xjf sensevoice.tar.bz2
+          cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.onnx OfflineCopyExtractor-v2/app/src/main/assets/sensevoice/
+          cp sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/tokens.txt OfflineCopyExtractor-v2/app/src/main/assets/sensevoice/
+          rm -rf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17 sensevoice.tar.bz2
+
+      - name: 6. 编译签名版 Release APK
+        working-directory: OfflineCopyExtractor-v2
+        run: gradle assembleRelease --no-daemon
+
+      - name: 7. 上传 APK 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: OfflineCopyExtractor-v2.4-APK
+          path: OfflineCopyExtractor-v2/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
